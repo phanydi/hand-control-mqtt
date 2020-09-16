@@ -4,6 +4,7 @@ import emulator.models.MqttDataModel
 import io.reactivex.rxjava3.kotlin.subscribeBy
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import kotlin.concurrent.timer
 
 /**
  * Эмулятор бионического протеза руки. Поддерживает протокол протеза и выполняет отправку данных, эмулирующих протез.
@@ -30,7 +31,6 @@ class ControllerEmulator {
         // Подписка на состояние подключения
         client.getIsConnectedObservable().subscribeBy(onNext = {
             isConnected = true
-            client.sendData("controllers", "Test message")
         }, onError = {
             logger.error(it.message)
         }, onComplete = {

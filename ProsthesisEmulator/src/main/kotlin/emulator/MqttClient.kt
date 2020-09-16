@@ -11,6 +11,7 @@ import io.vertx.mqtt.MqttClientOptions
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 import java.util.*
+import kotlin.concurrent.timer
 
 class MqttClient : io.vertx.core.AbstractVerticle() {
     private companion object {
@@ -18,12 +19,19 @@ class MqttClient : io.vertx.core.AbstractVerticle() {
         const val BROKER_PORT = 1883
     }
 
+    private val clientId = "HC-"+ UUID.randomUUID()
+
     private val client: MqttClient = MqttClient.create(
         Vertx.vertx(),
         MqttClientOptions()
-            .setUsername("controller")
-            .setPassword("controller")
-            .setClientId("HC-"+ UUID.randomUUID())
+            .setUsername("controllers")
+            .setPassword("controllers")
+            .setClientId(clientId)
+            .setWillFlag(true)
+            .setWillQoS(2)
+            .setWillRetain(true)
+            .setWillTopic("controllers/offline")
+            .setWillMessage(clientId)
     )
 
     private val logger: Logger = LogManager.getLogger(MqttClient::class.java.name)
@@ -76,6 +84,11 @@ class MqttClient : io.vertx.core.AbstractVerticle() {
                 logger.info("Connected to a server")
                 client.subscribe("controllers", 2)
                 isConnectedSubject.onNext(true)
+
+                // Отправляем сообщения, чтобы эмулятор мог быть обнаружен
+                timer(null, true, 0, 15000) {
+                    sendData("controllers/online", clientId)
+                }
             } else {
                 logger.error("Failed to connect to a server")
                 logger.error(ch.cause())
