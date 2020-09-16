@@ -2,7 +2,6 @@ import io.netty.handler.codec.mqtt.MqttQoS
 import io.vertx.core.Vertx
 import io.vertx.core.buffer.Buffer
 import io.vertx.mqtt.MqttServer
-import org.apache.logging.log4j.Level
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
 
@@ -64,7 +63,7 @@ class MQTTServer : io.vertx.core.AbstractVerticle()  {
                 for (t in unsubscribe.topics()) {
                     logger.info("Unsubscription for $t")
                 }
-                
+
                 // ack the subscriptions request
                 endpoint.unsubscribeAcknowledge(unsubscribe.messageId())
             }
