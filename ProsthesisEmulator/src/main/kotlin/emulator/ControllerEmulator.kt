@@ -12,16 +12,29 @@ class ControllerEmulator {
     private val client: MqttClient = MqttClient();
     private val logger: Logger = LogManager.getLogger(ControllerEmulator::class.java.name)
 
+    private var isConnected: Boolean = false
+
     /**
      * Запуск эмулятора. Выполняет подключение к Mqtt брокеру и начинает прием сообщений.
      */
     fun start() {
+        // Подписка на прием данных
         client.getDataObservable().subscribeBy(onNext = {
             this.receiveDataHandler(it)
         }, onError = {
             logger.error(it.message)
         }, onComplete = {
-            logger.info("dataSubject complete")
+            logger.info("DataObservable complete")
+        })
+
+        // Подписка на состояние подключения
+        client.getIsConnectedObservable().subscribeBy(onNext = {
+            isConnected = true
+            client.sendData("controllers", "Test message")
+        }, onError = {
+            logger.error(it.message)
+        }, onComplete = {
+            logger.info("IsConnectedObservable complete")
         })
 
         client.start()

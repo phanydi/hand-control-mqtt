@@ -1,12 +1,18 @@
+import io.netty.handler.codec.mqtt.MqttConnectReturnCode
 import io.netty.handler.codec.mqtt.MqttQoS
 import io.vertx.core.Vertx
-import io.vertx.core.buffer.Buffer
 import io.vertx.mqtt.MqttServer
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
+import kotlin.streams.toList
 
-class MQTTServer : io.vertx.core.AbstractVerticle()  {
+class MQTTServer : io.vertx.core.AbstractVerticle() {
     private val logger: Logger = LogManager.getLogger(MQTTServer::class.java.name)
+    private var controllerLogin = "controller"
+    private var controllerPassword = "controller"
+    private val regexControllers = Regex("HC-.*")
+
+    private val endpointsHashMap: HashMap<String, EndpointInformationModel> = HashMap()
 
     override fun start() {
 
@@ -26,8 +32,25 @@ class MQTTServer : io.vertx.core.AbstractVerticle()  {
 
             logger.info("[keep alive timeout = ${endpoint.keepAliveTimeSeconds()}]")
 
+            val isController = regexControllers.matches(endpoint.clientIdentifier())
+            if (isController) {
+                if (endpoint.auth().username != controllerLogin || endpoint.auth().password != controllerPassword) {
+                    logger.info("MQTT client [${endpoint.clientIdentifier()}] is controller but username or password is incorrect.")
+                    endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_BAD_USER_NAME_OR_PASSWORD)
+                    return@endpointHandler
+                }
+            }
+
+            if (endpointsHashMap.containsKey(endpoint.clientIdentifier())) {
+                endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_IDENTIFIER_REJECTED)
+                return@endpointHandler
+            }
+
+            endpointsHashMap[endpoint.clientIdentifier()] = EndpointInformationModel(endpoint)
+            logger.info("Add [${endpoint.clientIdentifier()}] to HashMap [${endpointsHashMap.size}]")
+
             // accept connection from the remote client
-            endpoint.accept(false)
+            endpoint.accept(true)
 
             // handling requests for subscriptions
             endpoint.subscribeHandler { subscribe ->
@@ -35,18 +58,12 @@ class MQTTServer : io.vertx.core.AbstractVerticle()  {
                 for (s in subscribe.topicSubscriptions()) {
                     logger.info("Subscription for ${s.topicName()} with QoS ${s.qualityOfService()}")
                     grantedQosLevels.add(s.qualityOfService())
+                    endpointsHashMap[endpoint.clientIdentifier()]!!.topics.add(s)
+                    logger.info("Add new topic [${s.topicName()}] to [${endpoint.clientIdentifier()}]")
                 }
+
                 // ack the subscriptions request
                 endpoint.subscribeAcknowledge(subscribe.messageId(), grantedQosLevels)
-
-                // just as example, publish a message on the first topic with requested QoS
-                endpoint.publish(
-                        subscribe.topicSubscriptions()[0].topicName(),
-                        Buffer.buffer("Hello from the Vert.x MQTT server"),
-                        subscribe.topicSubscriptions()[0].qualityOfService(),
-                        false,
-                        false
-                )
 
                 // specifying handlers for handling QoS 1 and 2
                 endpoint.publishAcknowledgeHandler { messageId ->
@@ -62,6 +79,12 @@ class MQTTServer : io.vertx.core.AbstractVerticle()  {
             endpoint.unsubscribeHandler { unsubscribe ->
                 for (t in unsubscribe.topics()) {
                     logger.info("Unsubscription for $t")
+                    val removeTopic = endpointsHashMap[endpoint.clientIdentifier()]?.topics?.stream()?.filter { topic ->
+                        topic.topicName() == t
+                    }
+
+                    endpointsHashMap[endpoint.clientIdentifier()]!!.topics.remove(removeTopic)
+                    logger.info("Remove topic [${t}] from [${endpoint.clientIdentifier()}]")
                 }
 
                 // ack the subscriptions request
@@ -81,24 +104,35 @@ class MQTTServer : io.vertx.core.AbstractVerticle()  {
             // handling closing connection
             endpoint.closeHandler {
                 logger.info("Connection closed ${endpoint.clientIdentifier()}")
+                endpointsHashMap.remove(endpoint.clientIdentifier())
+                logger.info("Remove [${endpoint.clientIdentifier()}] from HashMap [${endpointsHashMap.size}]")
             }
 
             // handling incoming published messages
             endpoint.publishHandler { message ->
                 logger.info("Just received message on [${message.topicName()}] payload [${message.payload()}] with QoS [${message.qosLevel()}]")
 
-                endpoint.publish(
+                val endpointsWithSameTopics = endpointsHashMap.values.stream().filter { endpointFilter ->
+                    endpointFilter.topics.stream().anyMatch { topic ->
+                        topic.topicName() == message.topicName()
+                    }
+                }.toList()
+                logger.info("Find ${endpointsWithSameTopics.count()} endpoints with same topic: $endpointsWithSameTopics")
+
+                endpointsWithSameTopics.forEach { endpointSend ->
+                    endpointSend.endpoint.publish(
                         message.topicName(),
-                        Buffer.buffer(message.payload().toString() + " Server"),
+                        message.payload(),
                         message.qosLevel(),
                         false,
                         false
-                )
+                    )
 
-                if (message.qosLevel() == MqttQoS.AT_LEAST_ONCE) {
-                    endpoint.publishAcknowledge(message.messageId())
-                } else if (message.qosLevel() == MqttQoS.EXACTLY_ONCE) {
-                    endpoint.publishReceived(message.messageId())
+                    if (message.qosLevel() == MqttQoS.AT_LEAST_ONCE) {
+                        endpointSend.endpoint.publishAcknowledge(message.messageId())
+                    } else if (message.qosLevel() == MqttQoS.EXACTLY_ONCE) {
+                        endpointSend.endpoint.publishReceived(message.messageId())
+                    }
                 }
             }.publishReleaseHandler { messageId ->
                 endpoint.publishComplete(messageId)
@@ -108,7 +142,7 @@ class MQTTServer : io.vertx.core.AbstractVerticle()  {
             if (ar.succeeded()) {
                 logger.info("MQTT server is listening on port ${mqttServer.actualPort()}")
             } else {
-                System.err.println("Error on starting the server${ar.cause().printStackTrace()}")
+                logger.error("Error on starting the server ${ar.cause().printStackTrace()}")
             }
         }
     }

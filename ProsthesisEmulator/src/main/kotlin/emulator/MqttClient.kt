@@ -7,9 +7,10 @@ import io.reactivex.rxjava3.subjects.PublishSubject
 import io.vertx.core.Vertx
 import io.vertx.core.buffer.Buffer
 import io.vertx.mqtt.MqttClient
+import io.vertx.mqtt.MqttClientOptions
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.Logger
-import java.lang.RuntimeException
+import java.util.*
 
 class MqttClient : io.vertx.core.AbstractVerticle() {
     private companion object {
@@ -17,7 +18,14 @@ class MqttClient : io.vertx.core.AbstractVerticle() {
         const val BROKER_PORT = 1883
     }
 
-    private val client: MqttClient = MqttClient.create(Vertx.vertx())
+    private val client: MqttClient = MqttClient.create(
+        Vertx.vertx(),
+        MqttClientOptions()
+            .setUsername("controller")
+            .setPassword("controller")
+            .setClientId("HC-"+ UUID.randomUUID())
+    )
+
     private val logger: Logger = LogManager.getLogger(MqttClient::class.java.name)
 
     /**
@@ -25,14 +33,24 @@ class MqttClient : io.vertx.core.AbstractVerticle() {
      */
     private val dataSubject: PublishSubject<MqttDataModel> = PublishSubject.create()
 
+    /**
+     * Rx PublishSubject для состояния подключения.
+     */
+    private val isConnectedSubject: PublishSubject<Boolean> = PublishSubject.create()
+
     fun getDataObservable() : Observable<MqttDataModel> {
         return dataSubject.share()
+    }
+
+    fun getIsConnectedObservable() : Observable<Boolean> {
+        return isConnectedSubject.share()
     }
 
     /**
      * Выполнить подключение к серверу и подписаться на события Mqtt.
      */
     override fun start() {
+
         // handler will be called when we have a message in topic we subscribing for
         client.publishHandler { publish ->
 
@@ -56,10 +74,12 @@ class MqttClient : io.vertx.core.AbstractVerticle() {
         client.connect(BROKER_PORT, BROKER_HOST) { ch ->
             if (ch.succeeded()) {
                 logger.info("Connected to a server")
-                client.subscribe("testtopic/kotlin", 2)
+                client.subscribe("controllers", 2)
+                isConnectedSubject.onNext(true)
             } else {
                 logger.error("Failed to connect to a server")
                 logger.error(ch.cause())
+                isConnectedSubject.onError(ch.cause())
             }
         }
     }
@@ -68,28 +88,29 @@ class MqttClient : io.vertx.core.AbstractVerticle() {
      * Отправить бинарный поток на topic
      */
     fun sendData(topic: String, data: ByteArray) {
-        if (!client.isConnected) {
-            throw RuntimeException("Client not connected")
-        }
-
         val vertxData = Buffer.buffer(data)
-        client.publish(topic, vertxData, MqttQoS.EXACTLY_ONCE, false, false) { s ->
-            logger.info("Publish sent to a server")
-        }
+        sendData(topic, vertxData)
     }
 
     /**
      * Отправить текстовое сообщение на топик
      */
-    fun sendMessage(topic: String, message: String) {
+    fun sendData(topic: String, message: String) {
+        val vertxData = Buffer.buffer(message)
+        sendData(topic, vertxData)
+    }
+
+    private fun sendData(topic: String, vertxData: Buffer) {
         if (!client.isConnected) {
             throw RuntimeException("Client not connected")
         }
 
-        val vertxData = Buffer.buffer(message)
-
-        client.publish(topic, vertxData, MqttQoS.EXACTLY_ONCE, false, false) { s ->
-            println("Publish sent to a server")
+        client.publish(topic, vertxData, MqttQoS.EXACTLY_ONCE, true, true) { s ->
+            if (s.failed()) {
+                logger.error("Publish sent error to a server on $topic. Exception ${s.cause()}")
+            } else {
+                logger.info("Publish sent ${vertxData.bytes.size} bytes to a server on $topic")
+            }
         }
     }
 }
