@@ -3,8 +3,8 @@
 </a>
 
 
-# HandControl MQTT
-Репозиторий содержит MQTT Broker и эмуляторы MQTT клиентов на Kotlin.
+# HandControl Server
+Репозиторий содержит MQTT эмулятор протеза и сервер киберфизической системы HandControl на Kotlin.
 
 ---
 
