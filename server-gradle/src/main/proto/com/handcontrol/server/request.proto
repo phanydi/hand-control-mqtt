@@ -1,0 +1,28 @@
+syntax = "proto3";
+package com.handcontrol.server;
+
+service HandleRequest{
+  rpc login(LoginRequest) returns (LoginResult);
+  rpc ProRequest(ClientRequets) returns (ClientReply);
+}
+message LoginRequest {
+  string imei = 1;
+  string login = 2;
+  string password = 3;
+}
+
+message LoginResult {
+  string imei = 1;
+  string message = 2;
+}
+
+message ClientRequets {
+  string imei = 1;
+  int32 ProId = 2;
+  string request = 3;
+}
+
+message ClientReply {
+  string imei = 1;
+  string message = 2;
+}
